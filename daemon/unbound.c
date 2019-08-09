@@ -88,6 +88,13 @@
 #  include "nss.h"
 #endif
 
+/** print configure line **/
+static void show_configure_line(void)
+{
+	printf("Version %s\n", PACKAGE_VERSION);
+	printf("Configure line: %s\n", CONFCMDLINE);
+}
+
 /** print usage. */
 static void usage(void)
 {
@@ -103,7 +110,8 @@ static void usage(void)
 	printf("	file format is described in unbound.conf(5).\n");
 	printf("-d	do not fork into the background.\n");
 	printf("-p	do not create a pidfile.\n");
-	printf("-v	verbose (more times to increase verbosity)\n");
+	printf("-v	verbose (more times to increase verbosity).\n");
+	printf("-x	print out the configure line used during compilation.\n");
 #ifdef UB_ON_WINDOWS
 	printf("-w opt	windows option: \n");
 	printf("   	install, remove - manage the services entry\n");
@@ -720,7 +728,7 @@ main(int argc, char* argv[])
 	log_ident_default = strrchr(argv[0],'/')?strrchr(argv[0],'/')+1:argv[0];
 	log_ident_set(log_ident_default);
 	/* parse the options */
-	while( (c=getopt(argc, argv, "c:dhpvw:")) != -1) {
+	while( (c=getopt(argc, argv, "c:dhpvw:x")) != -1) {
 		switch(c) {
 		case 'c':
 			cfgfile = optarg;
@@ -741,6 +749,9 @@ main(int argc, char* argv[])
 		case 'w':
 			winopt = optarg;
 			break;
+		case 'x':
+			show_configure_line();
+			return 1;
 		case '?':
 		case 'h':
 		default:

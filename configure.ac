@@ -112,6 +112,8 @@ AC_SUBST(LIBUNBOUND_CURRENT)
 AC_SUBST(LIBUNBOUND_REVISION)
 AC_SUBST(LIBUNBOUND_AGE)
 
+AC_DEFINE_UNQUOTED(CONFCMDLINE, "$@", [Command line arguments used with configure])
+
 CFLAGS="$CFLAGS"
 AC_AIX
 if test "$ac_cv_header_minix_config_h" = "yes"; then
