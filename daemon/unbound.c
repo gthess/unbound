@@ -123,6 +123,8 @@ print_build_options(void)
 	printf("DNSCrypt feature available\n");
 #endif
 	ub_event_base_free(base);
+	printf("BSD licensed, see LICENSE in source package for details.\n");
+	printf("Report bugs to %s\n", PACKAGE_BUGREPORT);
 }
 
 /** print usage. */
