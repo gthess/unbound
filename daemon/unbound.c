@@ -97,11 +97,11 @@ print_build_options(void)
 	time_t t;
 	struct timeval now;
 	struct ub_event_base* base;
-	printf("Version %s\n", PACKAGE_VERSION);
+	printf("Version %s\n\n", PACKAGE_VERSION);
 	printf("Configure line: %s\n", CONFCMDLINE);
 	base = ub_default_event_base(0,&t,&now);
 	ub_get_event_sys(base, &evnm, &evsys, &evmethod);
-	printf("linked libs: %s %s (it uses %s), %s\n",
+	printf("Linked libs: %s %s (it uses %s), %s\n",
 		evnm, evsys, evmethod,
 #ifdef HAVE_SSL
 #  ifdef SSLEAY_VERSION
@@ -115,7 +115,7 @@ print_build_options(void)
 		"nettle"
 #endif
 		);
-	printf("linked modules:");
+	printf("Linked modules:");
 	for(m = module_list_avail(); *m; m++)
 		printf(" %s", *m);
 	printf("\n");
@@ -123,7 +123,7 @@ print_build_options(void)
 	printf("DNSCrypt feature available\n");
 #endif
 	ub_event_base_free(base);
-	printf("BSD licensed, see LICENSE in source package for details.\n");
+	printf("\nBSD licensed, see LICENSE in source package for details.\n");
 	printf("Report bugs to %s\n", PACKAGE_BUGREPORT);
 }
 
@@ -145,7 +145,7 @@ usage(void)
 	printf("   	install, remove - manage the services entry\n");
 	printf("   	service - used to start from services control panel\n");
 #endif
-	printf("Version %s\n", PACKAGE_VERSION);
+	printf("\nVersion %s\n", PACKAGE_VERSION);
 	printf("BSD licensed, see LICENSE in source package for details.\n");
 	printf("Report bugs to %s\n", PACKAGE_BUGREPORT);
 }
