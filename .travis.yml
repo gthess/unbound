@@ -19,9 +19,7 @@ jobs:
 before_install:
   - |
     if [ "$TRAVIS_OS_NAME" = "osx" ]; then
-        brew update
-        brew install openssl
-        which openssl
+        true
     fi
 script:
   - |
@@ -32,9 +30,7 @@ script:
       export CFLAGS="-DNDEBUG -g2 -O3 -fsanitize=address"
       ./configure
     elif [ "$TRAVIS_OS_NAME" = "osx" ]; then
-      export LDFLAGS="-L/usr/local/opt/openssl/lib"
-      export CFLAGS="-I/usr/local/opt/openssl/include"
-      ./configure --enable-debug --disable-flto
+      ./configure --enable-debug --disable-flto --with-ssl=/usr/local/opt/openssl/
     else
       ./configure --enable-debug --disable-flto
     fi
