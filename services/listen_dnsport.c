@@ -1059,11 +1059,13 @@ make_sock_port(int stype, const char* ifname, const char* port,
  * @param list: list head. changed.
  * @param s: fd.
  * @param ftype: if fd is UDP.
+ * @param pp2_enabled: if PROXYv2 is enabled for this port.
  * @param ub_sock: socket with address.
  * @return false on failure. list in unchanged then.
  */
 static int
-port_insert(struct listen_port** list, int s, enum listen_type ftype, struct unbound_socket* ub_sock)
+port_insert(struct listen_port** list, int s, enum listen_type ftype,
+	int pp2_enabled, struct unbound_socket* ub_sock)
 {
 	struct listen_port* item = (struct listen_port*)malloc(
 		sizeof(struct listen_port));
@@ -1072,6 +1074,7 @@ port_insert(struct listen_port** list, int s, enum listen_type ftype, struct unb
 	item->next = *list;
 	item->fd = s;
 	item->ftype = ftype;
+	item->pp2_enabled = pp2_enabled;
 	item->socket = ub_sock;
 	*list = item;
 	return 1;
@@ -1152,6 +1155,22 @@ if_is_ssl(const char* ifname, const char* port, int ssl_port,
 	return 0;
 }
 
+/** see if interface is PROXYv2, its port number == the proxy port number */
+static int
+if_is_pp2(const char* ifname, const char* port,
+	struct config_strlist* proxy_protocol_port)
+{
+	struct config_strlist* s;
+	char* p = strchr(ifname, '@');
+	for(s = proxy_protocol_port; s; s = s->next) {
+		if(p && atoi(p+1) == atoi(s->str))
+			return 1;
+		if(!p && atoi(port) == atoi(s->str))
+			return 1;
+	}
+	return 0;
+}
+
 /**
  * Helper for ports_open. Creates one interface (or NULL for default).
  * @param ifname: The interface ip address.
@@ -1167,6 +1186,7 @@ if_is_ssl(const char* ifname, const char* port, int ssl_port,
  * @param ssl_port: ssl service port number
  * @param tls_additional_port: list of additional ssl service port numbers.
  * @param https_port: DoH service port number
+ * @param proxy_protocol_port: list of PROXYv2 port numbers.
  * @param reuseport: try to set SO_REUSEPORT if nonNULL and true.
  * 	set to false on exit if reuseport failed due to no kernel support.
  * @param transparent: set IP_TRANSPARENT socket option.
@@ -1179,15 +1199,17 @@ if_is_ssl(const char* ifname, const char* port, int ssl_port,
  * @return: returns false on error.
  */
 static int
-ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp, 
+ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp,
 	struct addrinfo *hints, const char* port, struct listen_port** list,
 	size_t rcv, size_t snd, int ssl_port,
 	struct config_strlist* tls_additional_port, int https_port,
+	struct config_strlist* proxy_protocol_port,
 	int* reuseport, int transparent, int tcp_mss, int freebind,
 	int http2_nodelay, int use_systemd, int dnscrypt_port, int dscp)
 {
 	int s, noip6=0;
 	int is_https = if_is_https(ifname, port, https_port);
+	int is_pp2 = if_is_pp2(ifname, port, proxy_protocol_port);
 	int nodelay = is_https && http2_nodelay;
 	struct unbound_socket* ub_sock;
 #ifdef USE_DNSCRYPT
@@ -1202,11 +1224,22 @@ ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp,
 	if(!do_udp && !do_tcp)
 		return 0;
 
+	// XXX maybe do the same in check config
+	if(is_pp2) {
+		if(is_dnscrypt) {
+			fatal_exit("PROXYv2 and DNSCrypt combination not "
+				"supported!");
+		} else if(is_https) {
+			fatal_exit("PROXYv2 and DoH combination not "
+				"supported!");
+		}
+	}
+
 	if(do_auto) {
 		ub_sock = calloc(1, sizeof(struct unbound_socket));
 		if(!ub_sock)
 			return 0;
-		if((s = make_sock_port(SOCK_DGRAM, ifname, port, hints, 1, 
+		if((s = make_sock_port(SOCK_DGRAM, ifname, port, hints, 1,
 			&noip6, rcv, snd, reuseport, transparent,
 			tcp_mss, nodelay, freebind, use_systemd, dscp, ub_sock)) == -1) {
 			freeaddrinfo(ub_sock->addr);
@@ -1224,8 +1257,9 @@ ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp,
 			free(ub_sock);
 			return 0;
 		}
-		if(!port_insert(list, s,
-		   is_dnscrypt?listen_type_udpancil_dnscrypt:listen_type_udpancil, ub_sock)) {
+		if(!port_insert(list, s, is_dnscrypt
+			?listen_type_udpancil_dnscrypt:listen_type_udpancil,
+			is_pp2, ub_sock)) {
 			sock_close(s);
 			freeaddrinfo(ub_sock->addr);
 			free(ub_sock);
@@ -1236,7 +1270,7 @@ ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp,
 		if(!ub_sock)
 			return 0;
 		/* regular udp socket */
-		if((s = make_sock_port(SOCK_DGRAM, ifname, port, hints, 1, 
+		if((s = make_sock_port(SOCK_DGRAM, ifname, port, hints, 1,
 			&noip6, rcv, snd, reuseport, transparent,
 			tcp_mss, nodelay, freebind, use_systemd, dscp, ub_sock)) == -1) {
 			freeaddrinfo(ub_sock->addr);
@@ -1247,8 +1281,9 @@ ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp,
 			}
 			return 0;
 		}
-		if(!port_insert(list, s,
-		   is_dnscrypt?listen_type_udp_dnscrypt:listen_type_udp, ub_sock)) {
+		if(!port_insert(list, s, is_dnscrypt
+			?listen_type_udp_dnscrypt:listen_type_udp,
+			is_pp2, ub_sock)) {
 			sock_close(s);
 			freeaddrinfo(ub_sock->addr);
 			free(ub_sock);
@@ -1270,7 +1305,7 @@ ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp,
 			port_type = listen_type_tcp_dnscrypt;
 		else
 			port_type = listen_type_tcp;
-		if((s = make_sock_port(SOCK_STREAM, ifname, port, hints, 1, 
+		if((s = make_sock_port(SOCK_STREAM, ifname, port, hints, 1,
 			&noip6, 0, 0, reuseport, transparent, tcp_mss, nodelay,
 			freebind, use_systemd, dscp, ub_sock)) == -1) {
 			freeaddrinfo(ub_sock->addr);
@@ -1283,7 +1318,7 @@ ports_create_if(const char* ifname, int do_auto, int do_udp, int do_tcp,
 		}
 		if(is_ssl)
 			verbose(VERB_ALGO, "setup TCP for SSL service");
-		if(!port_insert(list, s, port_type, ub_sock)) {
+		if(!port_insert(list, s, port_type, is_pp2, ub_sock)) {
 			sock_close(s);
 			freeaddrinfo(ub_sock->addr);
 			free(ub_sock);
@@ -1369,6 +1404,7 @@ listen_create(struct comm_base* base, struct listen_port* ports,
 	/* create comm points as needed */
 	while(ports) {
 		struct comm_point* cp = NULL;
+		int update_req = 0;  //XXX rename this
 		if(ports->ftype == listen_type_udp ||
 		   ports->ftype == listen_type_udp_dnscrypt) {
 			cp = comm_point_create_udp(base, ports->fd,
@@ -1380,6 +1416,7 @@ listen_create(struct comm_base* base, struct listen_port* ports,
 				harden_large_queries, 0, NULL,
 				tcp_conn_limit, bufsize, front->udp_buff,
 				ports->ftype, cb, cb_arg, ports->socket);
+			update_req = 1;
 		} else if(ports->ftype == listen_type_ssl ||
 			ports->ftype == listen_type_http) {
 			cp = comm_point_create_tcp(base, ports->fd,
@@ -1410,6 +1447,9 @@ listen_create(struct comm_base* base, struct listen_port* ports,
 					"DNS-over-HTTPS.");
 #endif
 			}
+			else {
+				update_req = 1;
+			}
 		} else if(ports->ftype == listen_type_udpancil ||
 				  ports->ftype == listen_type_udpancil_dnscrypt) {
 			cp = comm_point_create_udp_ancil(base, ports->fd,
@@ -1419,6 +1459,15 @@ listen_create(struct comm_base* base, struct listen_port* ports,
 			log_err("can't create commpoint");
 			listen_delete(front);
 			return NULL;
+		}
+		//
+		cp->pp2_enabled = ports->pp2_enabled;
+		if(update_req) {
+			int i = 0;
+			for(i=0; i<tcp_accept_count; i++) {
+				cp->tcp_handlers[i]->pp2_enabled =
+					ports->pp2_enabled;
+			}
 		}
 		if((http_notls && ports->ftype == listen_type_http) ||
 			(ports->ftype == listen_type_tcp) ||
@@ -1748,7 +1797,9 @@ listening_ports_open(struct config_file* cfg, char** ifs, int num_ifs,
 						&hints, portbuf, &list,
 						cfg->so_rcvbuf, cfg->so_sndbuf,
 						cfg->ssl_port, cfg->tls_additional_port,
-						cfg->https_port, reuseport, cfg->ip_transparent,
+						cfg->https_port,
+						cfg->proxy_protocol_port,
+						reuseport, cfg->ip_transparent,
 						cfg->tcp_mss, cfg->ip_freebind,
 						cfg->http_nodelay, cfg->use_systemd,
 						cfg->dnscrypt_port, cfg->ip_dscp)) {
@@ -1763,7 +1814,9 @@ listening_ports_open(struct config_file* cfg, char** ifs, int num_ifs,
 						&hints, portbuf, &list,
 						cfg->so_rcvbuf, cfg->so_sndbuf,
 						cfg->ssl_port, cfg->tls_additional_port,
-						cfg->https_port, reuseport, cfg->ip_transparent,
+						cfg->https_port,
+						cfg->proxy_protocol_port,
+						reuseport, cfg->ip_transparent,
 						cfg->tcp_mss, cfg->ip_freebind,
 						cfg->http_nodelay, cfg->use_systemd,
 						cfg->dnscrypt_port, cfg->ip_dscp)) {
@@ -1781,7 +1834,8 @@ listening_ports_open(struct config_file* cfg, char** ifs, int num_ifs,
 				&hints, portbuf, &list,
 				cfg->so_rcvbuf, cfg->so_sndbuf,
 				cfg->ssl_port, cfg->tls_additional_port,
-				cfg->https_port, reuseport, cfg->ip_transparent,
+				cfg->https_port, cfg->proxy_protocol_port,
+				reuseport, cfg->ip_transparent,
 				cfg->tcp_mss, cfg->ip_freebind,
 				cfg->http_nodelay, cfg->use_systemd,
 				cfg->dnscrypt_port, cfg->ip_dscp)) {
@@ -1796,7 +1850,8 @@ listening_ports_open(struct config_file* cfg, char** ifs, int num_ifs,
 				&hints, portbuf, &list,
 				cfg->so_rcvbuf, cfg->so_sndbuf,
 				cfg->ssl_port, cfg->tls_additional_port,
-				cfg->https_port, reuseport, cfg->ip_transparent,
+				cfg->https_port, cfg->proxy_protocol_port,
+				reuseport, cfg->ip_transparent,
 				cfg->tcp_mss, cfg->ip_freebind,
 				cfg->http_nodelay, cfg->use_systemd,
 				cfg->dnscrypt_port, cfg->ip_dscp)) {
@@ -1813,7 +1868,8 @@ listening_ports_open(struct config_file* cfg, char** ifs, int num_ifs,
 				do_tcp, &hints, portbuf, &list, 
 				cfg->so_rcvbuf, cfg->so_sndbuf,
 				cfg->ssl_port, cfg->tls_additional_port,
-				cfg->https_port, reuseport, cfg->ip_transparent,
+				cfg->https_port, cfg->proxy_protocol_port,
+				reuseport, cfg->ip_transparent,
 				cfg->tcp_mss, cfg->ip_freebind,
 				cfg->http_nodelay, cfg->use_systemd,
 				cfg->dnscrypt_port, cfg->ip_dscp)) {
@@ -1828,7 +1884,8 @@ listening_ports_open(struct config_file* cfg, char** ifs, int num_ifs,
 				do_tcp, &hints, portbuf, &list, 
 				cfg->so_rcvbuf, cfg->so_sndbuf,
 				cfg->ssl_port, cfg->tls_additional_port,
-				cfg->https_port, reuseport, cfg->ip_transparent,
+				cfg->https_port, cfg->proxy_protocol_port,
+				reuseport, cfg->ip_transparent,
 				cfg->tcp_mss, cfg->ip_freebind,
 				cfg->http_nodelay, cfg->use_systemd,
 				cfg->dnscrypt_port, cfg->ip_dscp)) {

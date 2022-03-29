@@ -1,0 +1,106 @@
+# #-- proxy_protocol.test --#
+# source the master var file when it's there
+[ -f ../.tpkg.var.master ] && source ../.tpkg.var.master
+# use .tpkg.var.test for in test variable passing
+[ -f .tpkg.var.test ] && source .tpkg.var.test
+
+PRE="../.."
+. ../common.sh
+
+get_make
+(cd $PRE; $MAKE streamtcp)
+
+# Query without PROXYv2 (client localhost); expect the result back.
+for prot in "-u" ""; do
+	echo -n "> query two.example.net. "
+	if test -z $prot; then
+		echo "(over TCP)"
+	else
+		echo "(over UDP)"
+	fi
+	$PRE/streamtcp -u -f 127.0.0.1@$UNBOUND_PORT two.example.net. A IN >outfile 2>&1
+	if test "$?" -ne 0; then
+		echo "exit status not OK"
+		echo "> cat logfiles"
+		cat outfile
+		cat unbound.log
+		echo "Not OK"
+		exit 1
+	fi
+	cat outfile
+	if grep "two.example.net" outfile | grep "2.2.2.2"; then
+		echo "content OK"
+	else
+		echo "result contents not OK, for two.example.net"
+		echo "> cat logfiles"
+		cat outfile
+		cat unbound.log
+		echo "result contents not OK, for two.example.net"
+		exit 1
+	fi
+	echo "OK"
+	echo ""
+done
+
+# Query with PROXYv2 (client 1.1.1.1 should be allowed); expect the result back.
+for prot in "-u" ""; do
+	echo -n "> query one.example.net. "
+	if test -z $prot; then
+		echo "(over TCP)"
+	else
+		echo "(over UDP)"
+	fi
+	$PRE/streamtcp $prot -f 127.0.0.1@$PROXY_PORT -p 1.1.1.1@1234 one.example.net. A IN >outfile 2>&1
+	if test "$?" -ne 0; then
+		echo "exit status not OK"
+		echo "> cat logfiles"
+		cat outfile
+		cat unbound.log
+		echo "Not OK"
+		exit 1
+	fi
+	cat outfile
+	if grep "one.example.net" outfile | grep "1.1.1.1"; then
+		echo "content OK"
+	else
+		echo "result contents not OK, for one.example.net"
+		echo "> cat logfiles"
+		cat outfile
+		cat unbound.log
+		echo "result contents not OK, for one.example.net"
+		exit 1
+	fi
+done
+
+# Query with PROXYv2 (client 2.2.2.2 should be refused); expect the REFUSE back.
+for prot in "-u" ""; do
+	echo -n "> query one.example.net. "
+	if test -z $prot; then
+		echo "(over TCP)"
+	else
+		echo "(over UDP)"
+	fi
+	$PRE/streamtcp $prot -f 127.0.0.1@$PROXY_PORT -p 2.2.2.2 one.example.net. A IN >outfile 2>&1
+	if test "$?" -ne 0; then
+		echo "exit status not OK"
+		echo "> cat logfiles"
+		cat outfile
+		cat unbound.log
+		echo "Not OK"
+		exit 1
+	fi
+	cat outfile
+	if grep "rcode: REFUSE" outfile; then
+		echo "content OK"
+	else
+		echo "result contents not OK, for one.example.net"
+		echo "> cat logfiles"
+		cat outfile
+		cat unbound.log
+		echo "result contents not OK, for one.example.net"
+		exit 1
+	fi
+done
+
+echo "OK"
+exit 0

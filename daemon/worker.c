@@ -1156,6 +1156,7 @@ worker_handle_request(struct comm_point* c, void* arg, int error,
 		dt_msg_send_client_query(&worker->dtenv, &repinfo->addr, (void*)repinfo->c->socket->addr->ai_addr, c->type, c->buffer);
 	}
 #endif
+	//XXX Also check the proxy (if any) here; only for deny/refuse.
 	acladdr = acl_addr_lookup(worker->daemon->acl, &repinfo->addr, 
 		repinfo->addrlen);
 	acl = acl_get_control(acladdr);

@@ -107,11 +107,11 @@ enum listen_type {
  */
 struct unbound_socket {
 	/** socket-address structure */
-        struct addrinfo *       addr;
+	struct addrinfo* addr;
 	/** socket descriptor returned by socket() syscall */
-        int                     s;
+	int s;
 	/** address family (AF_INET/IF_INET6) */
-        int                     fam;
+	int fam;
 };
 
 /**
@@ -125,7 +125,10 @@ struct listen_port {
 	int fd;
 	/** type of file descriptor, udp or tcp */
 	enum listen_type ftype;
-	/** fill in unbpound_socket structure for every opened socket at Unbound startup */
+	/** if the port should support PROXYv2 */
+	int pp2_enabled;
+	/** fill in unbpound_socket structure for every opened socket at
+	 * Unbound startup */
 	struct unbound_socket* socket;
 };
 

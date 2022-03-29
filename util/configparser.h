@@ -375,7 +375,8 @@ extern int yydebug;
     VAR_ZONEMD_CHECK = 576,        /* VAR_ZONEMD_CHECK  */
     VAR_ZONEMD_REJECT_ABSENCE = 577, /* VAR_ZONEMD_REJECT_ABSENCE  */
     VAR_RPZ_SIGNAL_NXDOMAIN_RA = 578, /* VAR_RPZ_SIGNAL_NXDOMAIN_RA  */
-    VAR_INTERFACE_AUTOMATIC_PORTS = 579 /* VAR_INTERFACE_AUTOMATIC_PORTS  */
+    VAR_INTERFACE_AUTOMATIC_PORTS = 579, /* VAR_INTERFACE_AUTOMATIC_PORTS  */
+    VAR_PROXY_PROTOCOL_PORT = 580  /* VAR_PROXY_PROTOCOL_PORT  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -706,6 +707,7 @@ extern int yydebug;
 #define VAR_ZONEMD_REJECT_ABSENCE 577
 #define VAR_RPZ_SIGNAL_NXDOMAIN_RA 578
 #define VAR_INTERFACE_AUTOMATIC_PORTS 579
+#define VAR_PROXY_PROTOCOL_PORT 580
 
 /* Value type.  */
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
@@ -715,7 +717,11 @@ union YYSTYPE
 
 	char*	str;
 
+<<<<<<< 1289c53c1ad698e51a7adf0271d63af992d78a33
 #line 719 "util/configparser.h"
+=======
+#line 721 "util/configparser.h"
+>>>>>>> Initial wip commit.
 
 };
 typedef union YYSTYPE YYSTYPE;

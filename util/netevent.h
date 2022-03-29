@@ -129,7 +129,8 @@ struct comm_reply {
 	struct sockaddr_storage addr;
 	/** length of address */
 	socklen_t addrlen;
-	/** return type 0 (none), 4(IP4), 6(IP6) */
+	/** return type 0 (none), 4(IP4), 6(IP6)
+	 *  used only with listen_type_udp_ancil* */
 	int srctype;
 	/* DnsCrypt context */
 #ifdef USE_DNSCRYPT
@@ -153,6 +154,14 @@ struct comm_reply {
 		pktinfo;
 	/** max udp size for udp packets */
 	size_t max_udp_size;
+
+	//
+	/* if set, the request came through a proxy */
+	int is_proxied;
+	/** the proxy address to send the reply to (for UDP) */
+	struct sockaddr_storage proxy_addr;
+	/** the proxy address length */
+	socklen_t proxy_addrlen;
 };
 
 /** 
@@ -388,6 +397,16 @@ struct comm_point {
 	comm_point_callback_type* callback;
 	/** argument to pass to callback. */
 	void *cb_arg;
+
+	//
+	/* if set, PROXYv2 is expected on this connection */
+	int pp2_enabled;
+	/* header state for the PROXYv2 header (for TCP) */
+	enum {
+		pp2_header_none = 0,
+		pp2_header_init,
+		pp2_header_done
+	} pp2_got_header;
 };
 
 /**
@@ -645,7 +664,9 @@ void comm_point_drop_reply(struct comm_reply* repinfo);
  * @return: false on a failure.
  */
 int comm_point_send_udp_msg(struct comm_point* c, struct sldns_buffer* packet,
-	struct sockaddr* addr, socklen_t addrlen,int is_connected);
+	struct sockaddr* addr, socklen_t addrlen,int is_connected,
+	//
+	struct comm_reply* rep);
 
 /**
  * Stop listening for input on the commpoint. No callbacks will happen.

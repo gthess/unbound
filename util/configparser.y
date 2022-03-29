@@ -189,6 +189,7 @@ extern struct config_parser_state* cfg_parser;
 %token VAR_EDNS_CLIENT_STRING_OPCODE VAR_NSID
 %token VAR_ZONEMD_PERMISSIVE_MODE VAR_ZONEMD_CHECK VAR_ZONEMD_REJECT_ABSENCE
 %token VAR_RPZ_SIGNAL_NXDOMAIN_RA VAR_INTERFACE_AUTOMATIC_PORTS
+%token VAR_PROXY_PROTOCOL_PORT
 
 %%
 toplevelvars: /* empty */ | toplevelvars toplevelvar ;
@@ -312,7 +313,7 @@ content_server: server_num_threads | server_verbosity | server_port |
 	server_edns_client_string_opcode | server_nsid |
 	server_zonemd_permissive_mode | server_max_reuse_tcp_queries |
 	server_tcp_reuse_timeout | server_tcp_auth_query_timeout |
-	server_interface_automatic_ports
+	server_interface_automatic_ports | server_proxy_protocol_port
 
 	;
 stubstart: VAR_STUB_ZONE
@@ -2731,7 +2732,14 @@ server_edns_client_string_opcode: VAR_EDNS_CLIENT_STRING_OPCODE STRING_ARG
 			yyerror("option code must be in interval [0, 65535]");
 		else cfg_parser->cfg->edns_client_string_opcode = atoi($2);
 		free($2);
-
+	}
+	;
+server_proxy_protocol_port: VAR_PROXY_PROTOCOL_PORT STRING_ARG
+	{
+		OUTYY(("P(server_proxy_protocol_port:%s)\n", $2));
+		if(!cfg_strlist_insert(&cfg_parser->cfg->proxy_protocol_port,
+			$2))
+			yyerror("out of memory");
 	}
 	;
 stub_name: VAR_NAME STRING_ARG
