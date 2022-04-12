@@ -1866,7 +1866,7 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 			"not > 0 as expected, continuing with (harmless) 0 "
 			"length recv");
 	//
-	log_buf(0, "BUFFER 1", c->buffer);
+	//log_buf(0, "BUFFER 1", c->buffer);
 	if(c->pp2_enabled && c->pp2_got_header != pp2_header_done) {
 		struct pp2_header* header = NULL;
 		size_t want_read_size = 0;
@@ -1912,7 +1912,7 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 				c->tcp_byte_count += r;
 				if(c->tcp_byte_count != current_read_size) return 1;
 				c->pp2_got_header = pp2_header_init;
-				log_buf(0, "BUFFER 2", c->buffer);
+				//log_buf(0, "BUFFER 2", c->buffer);
 			}
 		}
 		if(c->pp2_got_header == pp2_header_init) {
@@ -1964,7 +1964,7 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 				c->tcp_byte_count += r;
 				if(c->tcp_byte_count != current_read_size) return 1;
 				c->pp2_got_header = pp2_header_done;
-				log_buf(0, "BUFFER 3", c->buffer);
+				//log_buf(0, "BUFFER 3", c->buffer);
 			}
 		}
 		if(c->pp2_got_header != pp2_header_done || !header) {
@@ -1984,7 +1984,7 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 		sldns_buffer_set_limit(c->buffer,
 			sldns_buffer_limit(c->buffer) - PP2_HEADER_SIZE -
 			ntohs(header->len));
-		log_buf(0, "BUFFER 4", c->buffer);
+		//log_buf(0, "BUFFER 4", c->buffer);
 		if(sldns_buffer_limit(c->buffer) == 0) {
 			verbose(VERB_ALGO, "proxy_protocol: no more bytes to "
 				"read after header; read again");
@@ -2031,7 +2031,7 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 	}
 	sldns_buffer_skip(c->buffer, r);
 	if(sldns_buffer_remaining(c->buffer) <= 0) {
-		log_buf(0, "BUFFER 5", c->buffer);
+		//log_buf(0, "BUFFER 5", c->buffer);
 		tcp_callback_reader(c);
 	}
 	return 1;
