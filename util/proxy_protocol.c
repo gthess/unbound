@@ -126,7 +126,8 @@ pp2_read_header(struct sldns_buffer* buf)
 		return NULL;
 	}
 	/* Check for supported family and protocol */
-	if(header->fam_prot != 0x11 /* AF_INET|STREAM */ &&
+	if(header->fam_prot != 0x00 /* AF_UNSPEC|UNSPEC */ &&
+		header->fam_prot != 0x11 /* AF_INET|STREAM */ &&
 		header->fam_prot != 0x12 /* AF_INET|DGRAM */ &&
 		header->fam_prot != 0x21 /* AF_INET6|STREAM */ &&
 		header->fam_prot != 0x22 /* AF_INET6|DGRAM */) {

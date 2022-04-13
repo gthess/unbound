@@ -664,6 +664,12 @@ static int consume_pp2_header(struct sldns_buffer* buf, struct comm_reply* rep,
 		 * No need to do anything with addresses. */
 		goto done;
 	}
+	if(header->fam_prot == 0x00) {
+		/* Unspecified family and protocol. This could be used for
+		 * health checks by proxies.
+		 * No need to do anything with addresses. */
+		goto done;
+	}
 	/* Copy the proxy address before replacing it with the actual client's
 	 * address. */
 	if(((struct sockaddr_in*)&rep->addr)->sin_family == AF_INET) {
