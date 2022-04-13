@@ -109,7 +109,7 @@ pp2_read_header(struct sldns_buffer* buf)
 	}
 	/* Check for PROXYv2 header */
 	if(memcmp(header, PP2_SIG, PP2_SIG_LEN) != 0 ||
-		(header->ver_cmd & 0xF0) == PP2_VERSION) {
+		((header->ver_cmd & 0xF0)>>4) != PP2_VERSION) {
 		log_err("proxy_protocol: could not match PROXYv2 header");
 		return NULL;
 	}
