@@ -717,11 +717,7 @@ union YYSTYPE
 
 	char*	str;
 
-<<<<<<< 1289c53c1ad698e51a7adf0271d63af992d78a33
-#line 719 "util/configparser.h"
-=======
 #line 721 "util/configparser.h"
->>>>>>> Initial wip commit.
 
 };
 typedef union YYSTYPE YYSTYPE;
