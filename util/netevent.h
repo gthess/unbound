@@ -403,10 +403,10 @@ struct comm_point {
 	int pp2_enabled;
 	/* header state for the PROXYv2 header (for TCP) */
 	enum {
-		pp2_header_none = 0,
-		pp2_header_init,
-		pp2_header_done
-	} pp2_got_header;
+		pp2_header_none = 0,  /* no header encounter yet */
+		pp2_header_init,  /* read the static part of the header */
+		pp2_header_done  /* read the full header */
+	} pp2_header_state;
 };
 
 /**

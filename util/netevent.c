@@ -1256,7 +1256,7 @@ reclaim_tcp_handler(struct comm_point* c)
 	c->tcp_more_write_again = NULL;
 	c->tcp_byte_count = 0;
 	//
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	sldns_buffer_clear(c->buffer);
 }
 
@@ -1763,6 +1763,7 @@ static int
 comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 {
 	ssize_t r;
+	int recv_initial = 0;
 	log_assert(c->type == comm_tcp || c->type == comm_local);
 	if(c->ssl)
 		return ssl_handle_it(c, 0);
@@ -1770,158 +1771,41 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 		return 0;
 
 	log_assert(fd != -1);
-	if(c->tcp_byte_count < sizeof(uint16_t)) {
-		/* read length bytes */
-		r = recv(fd,(void*)sldns_buffer_at(c->buffer,c->tcp_byte_count),
-			sizeof(uint16_t)-c->tcp_byte_count, 0);
-		if(r == 0) {
-			if(c->tcp_req_info)
-				return tcp_req_info_handle_read_close(c->tcp_req_info);
-			return 0;
-		} else if(r == -1) {
-#ifndef USE_WINSOCK
-			if(errno == EINTR || errno == EAGAIN)
-				return 1;
-#ifdef ECONNRESET
-			if(errno == ECONNRESET && verbosity < 2)
-				return 0; /* silence reset by peer */
-#endif
-#ifdef ECONNREFUSED
-			if(errno == ECONNREFUSED && verbosity < 2)
-				return 0; /* silence reset by peer */
-#endif
-#ifdef ENETUNREACH
-			if(errno == ENETUNREACH && verbosity < 2)
-				return 0; /* silence it */
-#endif
-#ifdef EHOSTDOWN
-			if(errno == EHOSTDOWN && verbosity < 2)
-				return 0; /* silence it */
-#endif
-#ifdef EHOSTUNREACH
-			if(errno == EHOSTUNREACH && verbosity < 2)
-				return 0; /* silence it */
-#endif
-#ifdef ENETDOWN
-			if(errno == ENETDOWN && verbosity < 2)
-				return 0; /* silence it */
-#endif
-#ifdef EACCES
-			if(errno == EACCES && verbosity < 2)
-				return 0; /* silence it */
-#endif
-#ifdef ENOTCONN
-			if(errno == ENOTCONN) {
-				log_err_addr("read (in tcp s) failed and this "
-					"could be because TCP Fast Open is "
-					"enabled [--disable-tfo-client "
-					"--disable-tfo-server] but does not "
-					"work", sock_strerror(errno),
-					&c->repinfo.addr, c->repinfo.addrlen);
-				return 0;
-			}
-#endif
-#else /* USE_WINSOCK */
-			if(WSAGetLastError() == WSAECONNREFUSED && verbosity < 2)
-				return 0;
-			if(WSAGetLastError() == WSAEHOSTDOWN && verbosity < 2)
-				return 0;
-			if(WSAGetLastError() == WSAEHOSTUNREACH && verbosity < 2)
-				return 0;
-			if(WSAGetLastError() == WSAENETDOWN && verbosity < 2)
-				return 0;
-			if(WSAGetLastError() == WSAENETUNREACH && verbosity < 2)
-				return 0;
-			if(WSAGetLastError() == WSAECONNRESET)
-				return 0;
-			if(WSAGetLastError() == WSAEINPROGRESS)
-				return 1;
-			if(WSAGetLastError() == WSAEWOULDBLOCK) {
-				ub_winsock_tcp_wouldblock(c->ev->ev,
-					UB_EV_READ);
-				return 1;
-			}
-#endif
-			log_err_addr("read (in tcp s)", sock_strerror(errno),
-				&c->repinfo.addr, c->repinfo.addrlen);
-			return 0;
-		} 
-		c->tcp_byte_count += r;
-		if(c->tcp_byte_count != sizeof(uint16_t))
-			return 1;
-		if(sldns_buffer_read_u16_at(c->buffer, 0) >
-			sldns_buffer_capacity(c->buffer)) {
-			verbose(VERB_QUERY, "tcp: dropped larger than buffer");
-			return 0;
-		}
-		sldns_buffer_set_limit(c->buffer,
-			sldns_buffer_read_u16_at(c->buffer, 0));
-		if(!short_ok &&
-			sldns_buffer_limit(c->buffer) <
-			(c->pp2_enabled&&c->pp2_got_header!=pp2_header_done
-			 ?PP2_HEADER_SIZE:LDNS_HEADER_SIZE)) {
-			verbose(VERB_QUERY, "tcp: dropped bogus too short.");
-			return 0;
-		}
-		verbose(VERB_ALGO, "Reading tcp query of length %d",
-			(int)sldns_buffer_limit(c->buffer));
-	}
-
-	if(sldns_buffer_remaining(c->buffer) == 0)
-		log_err("in comm_point_tcp_handle_read buffer_remaining is "
-			"not > 0 as expected, continuing with (harmless) 0 "
-			"length recv");
-	//
 	//log_buf(0, "BUFFER 1", c->buffer);
-	if(c->pp2_enabled && c->pp2_got_header != pp2_header_done) {
+	if(c->pp2_enabled && c->pp2_header_state != pp2_header_done) {
 		struct pp2_header* header = NULL;
 		size_t want_read_size = 0;
 		size_t current_read_size = 0;
-		if(c->pp2_got_header == pp2_header_none) {
+		if(c->pp2_header_state == pp2_header_none) {
 			want_read_size = PP2_HEADER_SIZE;
-			verbose(VERB_ALGO, "proxy_protocol: reading fixed "
-				"part of PROXYv2 header (len %lu)",
-				want_read_size);
 			if(sldns_buffer_remaining(c->buffer)<want_read_size) {
 				log_err_addr("proxy_protocol: not enough "
 					"buffer size to read PROXYv2 header", "",
 					&c->repinfo.addr, c->repinfo.addrlen);
 				return 0;
 			}
-			current_read_size = sizeof(uint16_t) + want_read_size;
+			verbose(VERB_ALGO, "proxy_protocol: reading fixed "
+				"part of PROXYv2 header (len %lu)",
+				want_read_size);
+			current_read_size = want_read_size;
 			if(c->tcp_byte_count < current_read_size) {
 				r = recv(fd, (void*)sldns_buffer_at(c->buffer,
-					c->tcp_byte_count - sizeof(uint16_t)),
-					current_read_size - c->tcp_byte_count, 0);
+					c->tcp_byte_count),
+					current_read_size-c->tcp_byte_count, 0);
 				if(r == 0) {
 					if(c->tcp_req_info)
 						return tcp_req_info_handle_read_close(c->tcp_req_info);
 					return 0;
 				} else if(r == -1) {
-#ifndef USE_WINSOCK
-					if(errno == EINTR || errno == EAGAIN)
-						return 1;
-#else /* USE_WINSOCK */
-					if(WSAGetLastError() == WSAECONNRESET)
-						return 0;
-					if(WSAGetLastError() == WSAEINPROGRESS)
-						return 1;
-					if(WSAGetLastError() == WSAEWOULDBLOCK) {
-						ub_winsock_tcp_wouldblock(c->ev->ev, UB_EV_READ);
-						return 1;
-					}
-#endif
-					log_err_addr("read (in tcp r)", sock_strerror(errno),
-						&c->repinfo.addr, c->repinfo.addrlen);
-					return 0;
+					goto recv_error_initial;
 				}
 				c->tcp_byte_count += r;
 				if(c->tcp_byte_count != current_read_size) return 1;
-				c->pp2_got_header = pp2_header_init;
+				c->pp2_header_state = pp2_header_init;
 				//log_buf(0, "BUFFER 2", c->buffer);
 			}
 		}
-		if(c->pp2_got_header == pp2_header_init) {
+		if(c->pp2_header_state == pp2_header_init) {
 			header = pp2_read_header(c->buffer);
 			if(!header) {
 				log_err("proxy_protocol: could not parse "
@@ -1929,9 +1813,6 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 				return 0;
 			}
 			want_read_size = ntohs(header->len);
-			verbose(VERB_ALGO, "proxy_protocol: reading variable "
-				"part of PROXYv2 header (len %lu)",
-				want_read_size);
 			if(sldns_buffer_remaining(c->buffer) <
 				PP2_HEADER_SIZE + want_read_size) {
 				log_err_addr("proxy_protocol: not enough "
@@ -1939,41 +1820,28 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 					&c->repinfo.addr, c->repinfo.addrlen);
 				return 0;
 			}
-			current_read_size = sizeof(uint16_t) +
-				PP2_HEADER_SIZE + want_read_size;
+			verbose(VERB_ALGO, "proxy_protocol: reading variable "
+				"part of PROXYv2 header (len %lu)",
+				want_read_size);
+			current_read_size = PP2_HEADER_SIZE + want_read_size;
 			if(c->tcp_byte_count < current_read_size) {
 				r = recv(fd, (void*)sldns_buffer_at(c->buffer,
-					c->tcp_byte_count-sizeof(uint16_t)), // XXX wrong write to buffer. we need to see all theheader
+					c->tcp_byte_count),
 					current_read_size-c->tcp_byte_count, 0);
 				if(r == 0) {
 					if(c->tcp_req_info)
 						return tcp_req_info_handle_read_close(c->tcp_req_info);
 					return 0;
 				} else if(r == -1) {
-#ifndef USE_WINSOCK
-					if(errno == EINTR || errno == EAGAIN)
-						return 1;
-#else /* USE_WINSOCK */
-					if(WSAGetLastError() == WSAECONNRESET)
-						return 0;
-					if(WSAGetLastError() == WSAEINPROGRESS)
-						return 1;
-					if(WSAGetLastError() == WSAEWOULDBLOCK) {
-						ub_winsock_tcp_wouldblock(c->ev->ev, UB_EV_READ);
-						return 1;
-					}
-#endif
-					log_err_addr("read (in tcp r)", sock_strerror(errno),
-						&c->repinfo.addr, c->repinfo.addrlen);
-					return 0;
+					goto recv_error;
 				}
 				c->tcp_byte_count += r;
 				if(c->tcp_byte_count != current_read_size) return 1;
-				c->pp2_got_header = pp2_header_done;
+				c->pp2_header_state = pp2_header_done;
 				//log_buf(0, "BUFFER 3", c->buffer);
 			}
 		}
-		if(c->pp2_got_header != pp2_header_done || !header) {
+		if(c->pp2_header_state != pp2_header_done || !header) {
 			log_err_addr("proxy_protocol: wrong state for the "
 				"PROXYv2 header", "", &c->repinfo.addr,
 				c->repinfo.addrlen);
@@ -1987,24 +1855,42 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 		}
 		verbose(VERB_ALGO, "proxy_protocol: successful read of "
 			"PROXYv2 header");
-		sldns_buffer_set_limit(c->buffer,
-			sldns_buffer_limit(c->buffer) - PP2_HEADER_SIZE -
-			ntohs(header->len));
-		//log_buf(0, "BUFFER 4", c->buffer);
-		if(sldns_buffer_limit(c->buffer) == 0) {
-			verbose(VERB_ALGO, "proxy_protocol: no more bytes to "
-				"read after header; read again");
-			/* Clear and reset the buffer to read the following
-			 * DNS packet(s). */
-			sldns_buffer_clear(c->buffer);
-			c->tcp_byte_count = 0;
+		/* Clear and reset the buffer to read the following
+		    * DNS packet(s). */
+		sldns_buffer_clear(c->buffer);
+		c->tcp_byte_count = 0;
+		return 1;
+	}
+
+	if(c->tcp_byte_count < sizeof(uint16_t)) {
+		/* read length bytes */
+		r = recv(fd,(void*)sldns_buffer_at(c->buffer,c->tcp_byte_count),
+			sizeof(uint16_t)-c->tcp_byte_count, 0);
+		if(r == 0) {
+			if(c->tcp_req_info)
+				return tcp_req_info_handle_read_close(c->tcp_req_info);
+			return 0;
+		} else if(r == -1) {
+			if(c->pp2_enabled) goto recv_error;
+			goto recv_error_initial;
+		} 
+		c->tcp_byte_count += r;
+		if(c->tcp_byte_count != sizeof(uint16_t))
 			return 1;
+		if(sldns_buffer_read_u16_at(c->buffer, 0) >
+			sldns_buffer_capacity(c->buffer)) {
+			verbose(VERB_QUERY, "tcp: dropped larger than buffer");
+			return 0;
 		}
+		sldns_buffer_set_limit(c->buffer,
+			sldns_buffer_read_u16_at(c->buffer, 0));
 		if(!short_ok &&
 			sldns_buffer_limit(c->buffer) < LDNS_HEADER_SIZE) {
 			verbose(VERB_QUERY, "tcp: dropped bogus too short.");
 			return 0;
 		}
+		verbose(VERB_ALGO, "Reading tcp query of length %d",
+			(int)sldns_buffer_limit(c->buffer));
 	}
 
 	if(sldns_buffer_remaining(c->buffer) == 0)
@@ -2018,22 +1904,7 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 			return tcp_req_info_handle_read_close(c->tcp_req_info);
 		return 0;
 	} else if(r == -1) {
-#ifndef USE_WINSOCK
-		if(errno == EINTR || errno == EAGAIN)
-			return 1;
-#else /* USE_WINSOCK */
-		if(WSAGetLastError() == WSAECONNRESET)
-			return 0;
-		if(WSAGetLastError() == WSAEINPROGRESS)
-			return 1;
-		if(WSAGetLastError() == WSAEWOULDBLOCK) {
-			ub_winsock_tcp_wouldblock(c->ev->ev, UB_EV_READ);
-			return 1;
-		}
-#endif
-		log_err_addr("read (in tcp r)", sock_strerror(errno),
-			&c->repinfo.addr, c->repinfo.addrlen);
-		return 0;
+		goto recv_error;
 	}
 	sldns_buffer_skip(c->buffer, r);
 	if(sldns_buffer_remaining(c->buffer) <= 0) {
@@ -2041,6 +1912,80 @@ comm_point_tcp_handle_read(int fd, struct comm_point* c, int short_ok)
 		tcp_callback_reader(c);
 	}
 	return 1;
+
+recv_error_initial:
+	recv_initial = 1;
+recv_error:
+#ifndef USE_WINSOCK
+	if(errno == EINTR || errno == EAGAIN)
+		return 1;
+	if(recv_initial) {
+#ifdef ECONNRESET
+		if(errno == ECONNRESET && verbosity < 2)
+			return 0; /* silence reset by peer */
+#endif
+#ifdef ECONNREFUSED
+		if(errno == ECONNREFUSED && verbosity < 2)
+			return 0; /* silence reset by peer */
+#endif
+#ifdef ENETUNREACH
+		if(errno == ENETUNREACH && verbosity < 2)
+			return 0; /* silence it */
+#endif
+#ifdef EHOSTDOWN
+		if(errno == EHOSTDOWN && verbosity < 2)
+			return 0; /* silence it */
+#endif
+#ifdef EHOSTUNREACH
+		if(errno == EHOSTUNREACH && verbosity < 2)
+			return 0; /* silence it */
+#endif
+#ifdef ENETDOWN
+		if(errno == ENETDOWN && verbosity < 2)
+			return 0; /* silence it */
+#endif
+#ifdef EACCES
+		if(errno == EACCES && verbosity < 2)
+			return 0; /* silence it */
+#endif
+#ifdef ENOTCONN
+		if(errno == ENOTCONN) {
+			log_err_addr("read (in tcp s) failed and this "
+				"could be because TCP Fast Open is "
+				"enabled [--disable-tfo-client "
+				"--disable-tfo-server] but does not "
+				"work", sock_strerror(errno),
+				&c->repinfo.addr, c->repinfo.addrlen);
+			return 0;
+		}
+	}
+#endif
+#else /* USE_WINSOCK */
+	if(recv_initial) {
+		if(WSAGetLastError() == WSAECONNREFUSED && verbosity < 2)
+			return 0;
+		if(WSAGetLastError() == WSAEHOSTDOWN && verbosity < 2)
+			return 0;
+		if(WSAGetLastError() == WSAEHOSTUNREACH && verbosity < 2)
+			return 0;
+		if(WSAGetLastError() == WSAENETDOWN && verbosity < 2)
+			return 0;
+		if(WSAGetLastError() == WSAENETUNREACH && verbosity < 2)
+			return 0;
+	}
+	if(WSAGetLastError() == WSAECONNRESET)
+		return 0;
+	if(WSAGetLastError() == WSAEINPROGRESS)
+		return 1;
+	if(WSAGetLastError() == WSAEWOULDBLOCK) {
+		ub_winsock_tcp_wouldblock(c->ev->ev,
+			UB_EV_READ);
+		return 1;
+	}
+#endif
+	log_err_addr("read (in tcp s)", sock_strerror(errno),
+		&c->repinfo.addr, c->repinfo.addrlen);
+	return 0;
 }
 
 /** 
@@ -3575,7 +3520,7 @@ comm_point_create_udp(struct comm_base *base, int fd, sldns_buffer* buffer,
 	c->cb_arg = callback_arg;
 	c->socket = socket;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	evbits = UB_EV_READ | UB_EV_PERSIST;
 	/* ub_event stuff */
 	c->ev->ev = ub_event_new(base->eb->base, c->fd, evbits,
@@ -3638,7 +3583,7 @@ comm_point_create_udp_ancil(struct comm_base *base, int fd,
 	c->cb_arg = callback_arg;
 	c->socket = socket;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	evbits = UB_EV_READ | UB_EV_PERSIST;
 	/* ub_event stuff */
 	c->ev->ev = ub_event_new(base->eb->base, c->fd, evbits,
@@ -3719,7 +3664,7 @@ comm_point_create_tcp_handler(struct comm_base *base,
 	c->cb_arg = callback_arg;
 	c->socket = socket;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	if(spoolbuf) {
 		c->tcp_req_info = tcp_req_info_create(spoolbuf);
 		if(!c->tcp_req_info) {
@@ -3816,7 +3761,7 @@ comm_point_create_http_handler(struct comm_base *base,
 	c->cb_arg = callback_arg;
 	c->socket = socket;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 
 	c->http_min_version = http_version_2;
 	c->http2_stream_max_qbuffer_size = bufsize;
@@ -3933,7 +3878,7 @@ comm_point_create_tcp(struct comm_base *base, int fd, int num,
 	c->cb_arg = NULL;
 	c->socket = socket;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	evbits = UB_EV_READ | UB_EV_PERSIST;
 	/* ub_event stuff */
 	c->ev->ev = ub_event_new(base->eb->base, c->fd, evbits,
@@ -4027,7 +3972,7 @@ comm_point_create_tcp_out(struct comm_base *base, size_t bufsize,
 	c->callback = callback;
 	c->cb_arg = callback_arg;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	evbits = UB_EV_PERSIST | UB_EV_WRITE;
 	c->ev->ev = ub_event_new(base->eb->base, c->fd, evbits,
 		comm_point_tcp_handle_callback, c);
@@ -4095,7 +4040,7 @@ comm_point_create_http_out(struct comm_base *base, size_t bufsize,
 	c->callback = callback;
 	c->cb_arg = callback_arg;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	evbits = UB_EV_PERSIST | UB_EV_WRITE;
 	c->ev->ev = ub_event_new(base->eb->base, c->fd, evbits,
 		comm_point_http_handle_callback, c);
@@ -4160,7 +4105,7 @@ comm_point_create_local(struct comm_base *base, int fd, size_t bufsize,
 	c->callback = callback;
 	c->cb_arg = callback_arg;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	/* ub_event stuff */
 	evbits = UB_EV_PERSIST | UB_EV_READ;
 	c->ev->ev = ub_event_new(base->eb->base, c->fd, evbits,
@@ -4223,7 +4168,7 @@ comm_point_create_raw(struct comm_base* base, int fd, int writing,
 	c->callback = callback;
 	c->cb_arg = callback_arg;
 	c->pp2_enabled = 0;
-	c->pp2_got_header = 0;
+	c->pp2_header_state = pp2_header_none;
 	/* ub_event stuff */
 	if(writing)
 		evbits = UB_EV_PERSIST | UB_EV_WRITE;

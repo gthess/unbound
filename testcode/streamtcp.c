@@ -138,7 +138,6 @@ write_q(int fd, int udp, SSL* ssl, sldns_buffer* buf, uint16_t id,
 	qinfo.local_alias = NULL;
 
 	/* make query */
-	/* make query */
 	qinfo_query_encode(buf, &qinfo);
 	sldns_buffer_write_u16_at(buf, 0, id);
 	sldns_buffer_write_u16_at(buf, 2, BIT_RD);
@@ -410,29 +409,13 @@ send_em(const char* svr, const char* pp2_client, int udp, int usessl,
 	}
 	/* Send the PROXYv2 information once per stream */
 	if(!udp && pp2_parsed) {
-		uint16_t len = (uint16_t)sldns_buffer_limit(proxy_buf);
-		len = htons(len);
 		if(ssl) {
-			if(SSL_write(ssl, (void*)&len, (int)sizeof(len)) <= 0) {
-				log_crypto_err("cannot SSL_write");
-				exit(1);
-			}
 			if(SSL_write(ssl, (void*)sldns_buffer_begin(proxy_buf),
 				(int)sldns_buffer_limit(proxy_buf)) <= 0) {
 				log_crypto_err("cannot SSL_write");
 				exit(1);
 			}
 		} else {
-			if(send(fd, (void*)&len, sizeof(len), 0) <
-				(ssize_t)sizeof(len)){
-#ifndef USE_WINSOCK
-				perror("send() len failed");
-#else
-				printf("send len: %s\n",
-					wsa_strerror(WSAGetLastError()));
-#endif
-				exit(1);
-			}
 			if(send(fd, (void*)sldns_buffer_begin(proxy_buf),
 				sldns_buffer_limit(proxy_buf), 0) <
 				(ssize_t)sldns_buffer_limit(proxy_buf)) {
