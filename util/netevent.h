@@ -399,13 +399,16 @@ struct comm_point {
 	void *cb_arg;
 
 	//
-	/* if set, PROXYv2 is expected on this connection */
+	/** if set, PROXYv2 is expected on this connection */
 	int pp2_enabled;
-	/* header state for the PROXYv2 header (for TCP) */
+	/** header state for the PROXYv2 header (for TCP) */
 	enum {
-		pp2_header_none = 0,  /* no header encounter yet */
-		pp2_header_init,  /* read the static part of the header */
-		pp2_header_done  /* read the full header */
+		/** no header encounter yet */
+		pp2_header_none = 0,
+		/** read the static part of the header */
+		pp2_header_init,
+		/** read the full header */
+		pp2_header_done
 	} pp2_header_state;
 };
 

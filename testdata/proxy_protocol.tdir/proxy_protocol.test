@@ -13,12 +13,15 @@ get_make
 # Query without PROXYv2 (client localhost); expect the result back.
 for prot in "-u" ""; do
 	echo -n "> query two.example.net. "
-	if test -z $prot; then
-		echo "(over TCP)"
-	else
-		echo "(over UDP)"
-	fi
-	$PRE/streamtcp -u -f 127.0.0.1@$UNBOUND_PORT two.example.net. A IN >outfile 2>&1
+	port=$UNBOUND_PORT
+	case $prot in
+		-u)
+			echo "(over TCP)"
+			;;
+		*)
+			echo "(over UDP)"
+	esac
+	$PRE/streamtcp -u -f 127.0.0.1@$port two.example.net. A IN >outfile 2>&1
 	if test "$?" -ne 0; then
 		echo "exit status not OK"
 		echo "> cat logfiles"
@@ -43,14 +46,21 @@ for prot in "-u" ""; do
 done
 
 # Query with PROXYv2 (client 1.1.1.1 should be allowed); expect the result back.
-for prot in "-u" ""; do
-	echo -n "> query one.example.net. "
-	if test -z $prot; then
-		echo "(over TCP)"
-	else
-		echo "(over UDP)"
-	fi
-	$PRE/streamtcp $prot -f 127.0.0.1@$PROXY_PORT -p 1.1.1.1@1234 one.example.net. A IN >outfile 2>&1
+for prot in "-u" "" "-s"; do
+	echo -n "> query one.example.net. (proxied  "
+	port=$PROXY_PORT
+	case $prot in
+		-u)
+			echo "over TCP)"
+			;;
+		-s)
+			echo "over TLS)"
+			port=$PROXY_TLS_PORT
+			;;
+		*)
+			echo "over UDP)"
+	esac
+	$PRE/streamtcp $prot -f 127.0.0.1@$port -p 1.1.1.1@1234 one.example.net. A IN >outfile 2>&1
 	if test "$?" -ne 0; then
 		echo "exit status not OK"
 		echo "> cat logfiles"
@@ -73,14 +83,21 @@ for prot in "-u" ""; do
 done
 
 # Query with PROXYv2 (client 2.2.2.2 should be refused); expect the REFUSE back.
-for prot in "-u" ""; do
-	echo -n "> query one.example.net. "
-	if test -z $prot; then
-		echo "(over TCP)"
-	else
-		echo "(over UDP)"
-	fi
-	$PRE/streamtcp $prot -f 127.0.0.1@$PROXY_PORT -p 2.2.2.2 one.example.net. A IN >outfile 2>&1
+for prot in "-u" "" "-s"; do
+	echo -n "> query one.example.net. (proxied "
+	port=$PROXY_PORT
+	case $prot in
+		-u)
+			echo "over TCP)"
+			;;
+		-s)
+			echo "over TLS)"
+			port=$PROXY_TLS_PORT
+			;;
+		*)
+			echo "over UDP)"
+	esac
+	$PRE/streamtcp $prot -f 127.0.0.1@$port -p 2.2.2.2 one.example.net. A IN >outfile 2>&1
 	if test "$?" -ne 0; then
 		echo "exit status not OK"
 		echo "> cat logfiles"

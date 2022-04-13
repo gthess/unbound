@@ -1494,6 +1494,139 @@ ssl_handle_read(struct comm_point* c)
 		if(c->ssl_shake_state != comm_ssl_shake_none)
 			return 1;
 	}
+	if(c->pp2_enabled && c->pp2_header_state != pp2_header_done) {
+		struct pp2_header* header = NULL;
+		size_t want_read_size = 0;
+		size_t current_read_size = 0;
+		if(c->pp2_header_state == pp2_header_none) {
+			want_read_size = PP2_HEADER_SIZE;
+			if(sldns_buffer_remaining(c->buffer)<want_read_size) {
+				log_err_addr("proxy_protocol: not enough "
+					"buffer size to read PROXYv2 header", "",
+					&c->repinfo.addr, c->repinfo.addrlen);
+				return 0;
+			}
+			verbose(VERB_ALGO, "proxy_protocol: reading fixed "
+				"part of PROXYv2 header (len %lu)",
+				want_read_size);
+			current_read_size = want_read_size;
+			if(c->tcp_byte_count < current_read_size) {
+				ERR_clear_error();
+				if((r=SSL_read(c->ssl, (void*)sldns_buffer_at(
+					c->buffer, c->tcp_byte_count),
+					current_read_size -
+					c->tcp_byte_count)) <= 0) {
+					int want = SSL_get_error(c->ssl, r);
+					if(want == SSL_ERROR_ZERO_RETURN) {
+						if(c->tcp_req_info)
+							return tcp_req_info_handle_read_close(c->tcp_req_info);
+						return 0; /* shutdown, closed */
+					} else if(want == SSL_ERROR_WANT_READ) {
+#ifdef USE_WINSOCK
+						ub_winsock_tcp_wouldblock(c->ev->ev, UB_EV_READ);
+#endif
+						return 1; /* read more later */
+					} else if(want == SSL_ERROR_WANT_WRITE) {
+						c->ssl_shake_state = comm_ssl_shake_hs_write;
+						comm_point_listen_for_rw(c, 0, 1);
+						return 1;
+					} else if(want == SSL_ERROR_SYSCALL) {
+#ifdef ECONNRESET
+						if(errno == ECONNRESET && verbosity < 2)
+							return 0; /* silence reset by peer */
+#endif
+						if(errno != 0)
+							log_err("SSL_read syscall: %s",
+								strerror(errno));
+						return 0;
+					}
+					log_crypto_err("could not SSL_read");
+					return 0;
+				}
+				c->tcp_byte_count += r;
+				if(c->tcp_byte_count != current_read_size) return 1;
+				c->pp2_header_state = pp2_header_init;
+				//log_buf(0, "BUFFER 2", c->buffer);
+			}
+		}
+		if(c->pp2_header_state == pp2_header_init) {
+			header = pp2_read_header(c->buffer);
+			if(!header) {
+				log_err("proxy_protocol: could not parse "
+					"PROXYv2 header");
+				return 0;
+			}
+			want_read_size = ntohs(header->len);
+			if(sldns_buffer_remaining(c->buffer) <
+				PP2_HEADER_SIZE + want_read_size) {
+				log_err_addr("proxy_protocol: not enough "
+					"buffer size to read PROXYv2 header", "",
+					&c->repinfo.addr, c->repinfo.addrlen);
+				return 0;
+			}
+			verbose(VERB_ALGO, "proxy_protocol: reading variable "
+				"part of PROXYv2 header (len %lu)",
+				want_read_size);
+			current_read_size = PP2_HEADER_SIZE + want_read_size;
+			if(c->tcp_byte_count < current_read_size) {
+				ERR_clear_error();
+				if((r=SSL_read(c->ssl, (void*)sldns_buffer_at(
+					c->buffer, c->tcp_byte_count),
+					current_read_size -
+					c->tcp_byte_count)) <= 0) {
+					int want = SSL_get_error(c->ssl, r);
+					if(want == SSL_ERROR_ZERO_RETURN) {
+						if(c->tcp_req_info)
+							return tcp_req_info_handle_read_close(c->tcp_req_info);
+						return 0; /* shutdown, closed */
+					} else if(want == SSL_ERROR_WANT_READ) {
+#ifdef USE_WINSOCK
+						ub_winsock_tcp_wouldblock(c->ev->ev, UB_EV_READ);
+#endif
+						return 1; /* read more later */
+					} else if(want == SSL_ERROR_WANT_WRITE) {
+						c->ssl_shake_state = comm_ssl_shake_hs_write;
+						comm_point_listen_for_rw(c, 0, 1);
+						return 1;
+					} else if(want == SSL_ERROR_SYSCALL) {
+#ifdef ECONNRESET
+						if(errno == ECONNRESET && verbosity < 2)
+							return 0; /* silence reset by peer */
+#endif
+						if(errno != 0)
+							log_err("SSL_read syscall: %s",
+								strerror(errno));
+						return 0;
+					}
+					log_crypto_err("could not SSL_read");
+					return 0;
+				}
+				c->tcp_byte_count += r;
+				if(c->tcp_byte_count != current_read_size) return 1;
+				c->pp2_header_state = pp2_header_done;
+				//log_buf(0, "BUFFER 3", c->buffer);
+			}
+		}
+		if(c->pp2_header_state != pp2_header_done || !header) {
+			log_err_addr("proxy_protocol: wrong state for the "
+				"PROXYv2 header", "", &c->repinfo.addr,
+				c->repinfo.addrlen);
+			return 0;
+		}
+		if(!consume_pp2_header(c->buffer, &c->repinfo, 1)) {
+			log_err_addr("proxy_protocol: could not consume "
+				"PROXYv2 header", "", &c->repinfo.addr,
+				c->repinfo.addrlen);
+			return 0;
+		}
+		verbose(VERB_ALGO, "proxy_protocol: successful read of "
+			"PROXYv2 header");
+		/* Clear and reset the buffer to read the following
+		 * DNS packet(s). */
+		sldns_buffer_clear(c->buffer);
+		c->tcp_byte_count = 0;
+		return 1;
+	}
 	if(c->tcp_byte_count < sizeof(uint16_t)) {
 		/* read length bytes */
 		ERR_clear_error();

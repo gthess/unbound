@@ -6,13 +6,15 @@
 
 PRE="../.."
 . ../common.sh
-get_random_port 3
+get_random_port 4
 UNBOUND_PORT=$RND_PORT
 FWD_PORT=$(($RND_PORT + 1))
 PROXY_PORT=$(($RND_PORT + 2))
+PROXY_TLS_PORT=$(($RND_PORT + 3))
 echo "UNBOUND_PORT=$UNBOUND_PORT" >> .tpkg.var.test
 echo "FWD_PORT=$FWD_PORT" >> .tpkg.var.test
 echo "PROXY_PORT=$PROXY_PORT" >> .tpkg.var.test
+echo "PROXY_TLS_PORT=$PROXY_TLS_PORT" >> .tpkg.var.test
 
 # start forwarder
 get_ldns_testns
@@ -21,7 +23,7 @@ FWD_PID=$!
 echo "FWD_PID=$FWD_PID" >> .tpkg.var.test
 
 # make config file
-sed -e 's/@PORT\@/'$UNBOUND_PORT'/' -e 's/@TOPORT\@/'$FWD_PORT'/' -e 's/@PROXYPORT\@/'$PROXY_PORT'/' < proxy_protocol.conf > ub.conf
+sed -e 's/@PORT\@/'$UNBOUND_PORT'/' -e 's/@TOPORT\@/'$FWD_PORT'/' -e 's/@PROXYPORT\@/'$PROXY_PORT'/' -e 's/@PROXYTLSPORT\@/'$PROXY_TLS_PORT'/' < proxy_protocol.conf > ub.conf
 # start unbound in the background
 $PRE/unbound -d -c ub.conf >unbound.log 2>&1 &
 UNBOUND_PID=$!
