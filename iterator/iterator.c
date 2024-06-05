@@ -32,7 +32,33 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+// @JESSE: Iterator (this file) is the module that does all the needed DNS
+//         iterations and walking the DNS tree to try and find an answer.
+//         It includes but not limited to:
+//              1. Finding the closest known delegation point
+//                 (root at startup, or configured zones)
+//              2. Sends a query (the original query if no qname-minimisation)
+//                 to that and gets either an answer or a referral answer.
+//              3. In case of referral answer goes back to 1.
+//
+//          A lot more is happening here, like fallbacks and retries. Don't try
+//          to understand everything at once, it's better to go with the flow
+//          and see what is relevant for you.
 
+// @JESSE: We do not use '//' comments in the Unbound code base. I explicitly
+//         use them to identify non-relevant parts or WIP comments.
+
+// @JESSE: Some tips:
+//         - For printf kind of debug logging it's easier to use log_err();
+//           these are printed on all verbosity levels.
+//         - For domain name manipulation methods you can have a look at
+//           dname.c/h.
+//         - If you need to do allocations; for your case everything should
+//           have the lifetime of the query state (qstate); you can use
+//           qstate->region as your arena allocator and pass that region to
+//           functions that require one. You can then alloc items there and
+//           forget about them. The whole region is freed when the qstate is
+//           no more.
 /**
  * \file
  *
@@ -136,6 +162,8 @@ iter_deinit(struct module_env* env, int id)
 static int
 iter_new(struct module_qstate* qstate, int id)
 {
+	// @JESSE: each module can have its own query state. The iter_qstate
+	//         struct below is the state for the iterator.
 	struct iter_qstate* iq = (struct iter_qstate*)regional_alloc(
 		qstate->region, sizeof(struct iter_qstate));
 	qstate->minfo[id] = iq;
@@ -164,6 +192,9 @@ iter_new(struct module_qstate* qstate, int id)
 	iq->dnssec_lame_query = 0;
 	iq->chase_flags = qstate->query_flags;
 	/* Start with the (current) qname. */
+	// @JESSE: iq->qchase will be the qinfo iterator will be working on and
+	//         updating through the iteration process. It is set here to
+	//         the initial query (qstate->qinfo) that started all this.
 	iq->qchase = qstate->qinfo;
 	outbound_list_init(&iq->outlist);
 	iq->minimise_count = 0;
@@ -173,6 +204,7 @@ iter_new(struct module_qstate* qstate, int id)
 	else
 		iq->minimisation_state = DONOT_MINIMISE_STATE;
 	
+	// @JESSE: iq->qinfo_out is the qinfo that will be sent out.
 	memset(&iq->qinfo_out, 0, sizeof(struct query_info));
 	return 1;
 }
@@ -1596,6 +1628,8 @@ processInitRequest(struct module_qstate* qstate, struct iter_qstate* iq,
 		delname = iq->dp->name;
 		delnamelen = iq->dp->namelen;
 	} else {
+		// @JESSE: Here we set the delegation name to be the original
+		//         one ...
 		delname = iq->qchase.qname;
 		delnamelen = iq->qchase.qname_len;
 	}
@@ -1618,6 +1652,8 @@ processInitRequest(struct module_qstate* qstate, struct iter_qstate* iq,
 		
 		/* Lookup the delegation in the cache. If null, then the 
 		 * cache needs to be primed for the qclass. */
+		// @JESSE: ... and here we'll try to get the closest delegation
+		//         from cache.
 		if(delname)
 		     iq->dp = dns_cache_find_delegation(qstate->env, delname, 
 			delnamelen, iq->qchase.qtype, iq->qchase.qclass, 
@@ -2368,6 +2404,7 @@ check_waiting_queries(struct iter_qstate* iq, struct module_qstate* qstate,
 	}
 }
 	
+// @JESSE: This is where most of the iteration time will be spent.
 /** 
  * This is the request event state where the request will be sent to one of
  * its current query targets. This state also handles issuing target lookup
@@ -2531,6 +2568,11 @@ processQueryTargets(struct module_qstate* qstate, struct iter_qstate* iq,
 		return 0;
 	}
 
+	// @JESSE: The following ifs is where most qname-minimisation happens.
+	//         We need something similar (adding a label at a time) but
+	//         without the best-effort nature of qname-minimisation and its
+	//         fallback. You can take inspiration from here on how to
+	//         correctly set iq->qinfo_out.
 	if(iq->minimisation_state == INIT_MINIMISE_STATE
 		&& !(iq->chase_flags & BIT_RD)) {
 		/* (Re)set qinfo_out to (new) delegation point, except when
@@ -3000,6 +3042,7 @@ processQueryTargets(struct module_qstate* qstate, struct iter_qstate* iq,
 			iq->dp->name, &real_addr, real_addrlen);
 	}
 
+	// @JESSE: This is where a query is finally going out, hopefully.
 	fptr_ok(fptr_whitelist_modenv_send_query(qstate->env->send_query));
 	outq = (*qstate->env->send_query)(&iq->qinfo_out,
 		iq->chase_flags | (iq->chase_to_rd?BIT_RD:0),
@@ -3053,7 +3096,7 @@ find_NS(struct reply_info* rep, size_t from, size_t to)
 	return NULL;
 }
 
-
+// @JESSE: This is where responses are read.
 /** 
  * Process the query response. All queries end up at this state first. This
  * process generally consists of analyzing the response and routing the
@@ -3193,6 +3236,9 @@ processQueryResponse(struct module_qstate* qstate, struct iter_qstate* iq,
 	}
 
 	/* handle each of the type cases */
+	// @JESSE: Answers to _deleg queries would end up here. You need to
+	//         make sure you identify those answers correclty and treat
+	//         them the same way as referrals below.
 	if(type == RESPONSE_TYPE_ANSWER) {
 		/* ANSWER type responses terminate the query algorithm, 
 		 * so they sent on their */
@@ -3291,6 +3337,8 @@ processQueryResponse(struct module_qstate* qstate, struct iter_qstate* iq,
 			return next_state(iq, QUERYTARGETS_STATE);
 		}
 		return final_state(iq);
+	// @JESSE: I guess for the test environemnt we mostly don't care about
+	//         referrals; these are traditional DNS referral responses.
 	} else if(type == RESPONSE_TYPE_REFERRAL) {
 		struct delegpt* old_dp = NULL;
 		/* REFERRAL type responses get a reset of the 
@@ -4108,6 +4156,12 @@ iter_inform_super(struct module_qstate* qstate, int id,
 	else	processTargetResponse(qstate, id, super);
 }
 
+// @JESSE: These are all the available states the iterator could be for a given
+//         query. You should not worry about the following cases:
+//              - COLLECT_CLASS_STATE (it has to do with ANY queries)
+//              - DSNS_FIND_STATE (it tries to find the correct parent for a DS
+//                                 query; I think it is not relevant since the
+//                                 _deleg stuff always live at the parent)
 /**
  * Handle iterator state.
  * Handle events. This is the real processing loop for events, responsible
