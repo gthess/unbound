@@ -105,7 +105,7 @@ print_build_options(void)
 	time_t t;
 	struct timeval now;
 	struct ub_event_base* base;
-	printf("Version %s\n\n", PACKAGE_VERSION);
+	printf("Version %s mock\n\n", PACKAGE_VERSION);
 	printf("Configure line: %s\n", CONFCMDLINE);
 	base = ub_default_event_base(0,&t,&now);
 	ub_get_event_sys(base, &evnm, &evsys, &evmethod);
